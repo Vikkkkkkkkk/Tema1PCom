@@ -1,0 +1,49 @@
+VADUVA VICTOR-NICOLAE, 323CD ACS CTI
+
+In aceasta tema am implementat dataplane-ul unui router.
+
+Pentru inceput, sunt initializate tabela de rutare, impreuna cu structura de trie folosita
+pentru eficientizarea cautarii mastii de retea, tabela ARP, dar si o coada pentru stocarea
+pachetelor ce asteapta un raspuns ARP.
+
+Apoi, router-ul asteapta pachete pe care le parseaza corespunzator, in functie de tipul prezent
+in headerul ethernet, dupa cum urmeaza:
+
+   - Pentru pachete de tip IPv4:
+	- verifica daca a expirat timpul pachetului in retea, caz in care trimite un mesaj ICMP Time Exceeded Message
+	- cauta in tabela de rutare urmatorul "hop", iar daca nu il gaseste (nu exista ruta) trimite un mesaj ICMP catre sender Destination Unreachable
+	- daca pachetul este pentru router, acesta trimite un reply ICMP
+	- verifica daca checksum-ul din header-ul IPv4 este bun, apoi modifica ttl si recalculeaza checksum-ul
+	- cauta un entry in tabela ARP, iar in caz ca nu gaseste, trimite un ARP request pe adresa de broadcast si pune pachetul intr-o coada din care urmeaza sa fie scos cand primeste ARP reply
+	- seteaza MAC-ul sursa si MAC-ul destinatie si trimite pachetul
+	
+   - Pentru pachete de tip ARP:
+	- verifica tipul de mesaj ARP (request sau reply) si actioneaza corespunzator
+	- pentru pachete de tip request, trimite inapoi un pachet ARP tip reply
+	- pentru pachete de tip reply, adauga perechea IP-MAC in tabela ARP, dupa care verifica daca vreun pachet in asteptare din coada asteapta dupa adresa noua; daca da, trimite pachetul catre acea adresa
+	
+Pentru retinerea pachetelor ce asteapta dupa un ARP reply, am creat o structura ce retine interfata, pachetul in sine, lungimea pachetului si IP-ul catre care trebuie trimis
+
+Structura de trie este simpla, nodul din stanga reprezinta un bit de 0, iar nodul din dreapta reprezinta un bit de 1.
+Aceasta este folosita pentru a cauta urmatorul hop in tabela de rutare folosind Longest Prefix Match (LPM)
+
+Pentru a trimite mesajele ICMP pentru Time Exceeded si Destinacion Unreachable:
+	- trebuie setate sursa si destinatia din headerul IP
+	- resetat ttl-ul
+	- modificata lungimea totala (deoarece trebuie sa transmitem vechiul header ip si 64 de biti din vechiul payload)
+	- modificat protocolul
+	- recalculat checksum-ul headerului IP
+	- setarea type si code in headerul ICMP, conform mesajului pe care vrem sa il transmitem
+	- copierea payload-ului si calculul checksum pentru headerul ICMP, apoi trimiterea pachetului
+	
+Pentru a transmite ICMP reply, pasii sunt aproximativ aceiasi, dar difera payload-ul
+
+La primirea unui pachet ARP de tip request, trebuie doar sa trimitem un pachet ARP de tip reply:
+	- modificam IP-urile si MAC-urile sursa si destinatie corespunzator in headerul ARP
+	- modificam MAC-urile sursa si destinatie in headerul ethernet
+	- trimitem pachetul ARP reply
+	
+La primirea unui pachet ARP de tip reply, se executa urmatorii pasi:
+	- se adauga perechea IP-MAC in tabela ARP
+	- se parcurge coada de pachete in asteptare si se verifica daca vreunul din ele asteapta dupa adresa nou gasita
+	- in cazul in care trebuie forwardat, trebuie setate doar adresele MAC sursa si destinatie in headerul ethernet, apoi trimis pachetul.
